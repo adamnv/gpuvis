@@ -5411,7 +5411,7 @@ pid_from_cmdlist(struct pevent *pevent, const char *comm, struct cmdline *next)
 struct cmdline *pevent_data_pid_from_comm(struct pevent *pevent, const char *comm,
 					  struct cmdline *next)
 {
-	struct cmdline *cmdline;
+	struct cmdline *cmdline = NULL;
 
 	/*
 	 * If the cmdlines have not been converted yet, then use
