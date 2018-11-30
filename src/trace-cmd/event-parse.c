@@ -288,11 +288,13 @@ static int add_new_comm(struct pevent *pevent, const char *comm, int pid)
 		return -1;
 	}
 
-	cmdlines = realloc(cmdlines, sizeof(*cmdlines) * (pevent->cmdline_count + 1));
-	if (!cmdlines) {
+	struct cmdline *realloc_cmdlines = realloc(cmdlines, sizeof(*cmdlines) * (pevent->cmdline_count + 1));
+	if (!realloc_cmdlines) {
+		free(cmdlines);
 		errno = ENOMEM;
 		return -1;
 	}
+	cmdlines = realloc_cmdlines;
 
 	cmdlines[pevent->cmdline_count].comm = strdup(comm);
 	if (!cmdlines[pevent->cmdline_count].comm) {
