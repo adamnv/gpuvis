@@ -4366,12 +4366,12 @@ void MainApp::render_menu( const char *str_id )
         {
             std::string &filename = m_trace_win->m_trace_events.m_filename;
             const char *basename = get_path_filename( filename.c_str() );
-            std::string label = string_format( "Save '%s' as...", basename );
+            std::string label = string_format( "Copy '%s' to...", basename );
 
             if ( ImGui::MenuItem( label.c_str() ) )
             {
                 m_saving_info.filename_orig = get_realpath( filename.c_str() );
-                m_saving_info.title = string_format( "Save '%s' as:", m_saving_info.filename_orig.c_str() );
+                m_saving_info.title = string_format( "Copy '%s' to:", m_saving_info.filename_orig.c_str() );
                 strcpy_safe( m_saving_info.filename_buf, "blah.trace" );
 
                 // Lambda for copying filename_orig to filename_new
