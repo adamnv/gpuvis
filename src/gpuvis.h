@@ -97,6 +97,11 @@ public:
         return get_locations_u32( hashstr32( name ) );
     }
 
+    void clear()
+    {
+        m_locs.clear();
+    }
+
 public:
     // Map of name hashval to array of event locations.
     util_umap< uint32_t, std::vector< uint32_t > > m_locs;
@@ -447,6 +452,8 @@ public:
 public:
     // Called once on background thread after all events loaded.
     void init();
+    // Called once on background thread after additional events are later loaded.
+    void postmerge();
 
     void init_new_event( trace_event_t &event );
     void init_new_event_vblank( trace_event_t &event );

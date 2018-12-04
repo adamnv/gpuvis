@@ -168,6 +168,11 @@ public:
         return false;
     }
 
+    void clear()
+    {
+        m_map.clear();
+    }
+
 public:
     typedef std::unordered_map< K, V > map_t;
     map_t m_map;

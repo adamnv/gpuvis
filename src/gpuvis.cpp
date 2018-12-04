@@ -660,6 +660,7 @@ int TraceEvents::new_event_cb( const trace_event_t &event )
 int SDLCALL MainApp::thread_func( void *data )
 {
     util_time_t t0 = util_get_time();
+
     loading_info_t *loading_info = ( loading_info_t *)data;
     TraceEvents &trace_events = loading_info->win->m_trace_events;
     tracefile_type_t file_format = loading_info->file_format;
@@ -688,12 +689,20 @@ int SDLCALL MainApp::thread_func( void *data )
     }
 
     {
-        GPUVIS_TRACE_BLOCK( "trace_init" );
+        GPUVIS_TRACE_BLOCK( "trace_init_or_merge" );
 
         float time_load = util_time_to_ms( t0, util_get_time() );
 
-        // Call TraceEvents::init() to initialize all events, etc.
-        trace_events.init();
+        if (false && !merge_load) // FIXME - testing
+        {
+            // Call TraceEvents::init() to initialize all events, etc.
+            trace_events.init();
+        }
+        else
+        {
+            // re-sort additional events etc
+            trace_events.postmerge();
+        }
 
         float time_init = util_time_to_ms( t0, util_get_time() ) - time_load;
 
@@ -2019,6 +2028,20 @@ void TraceEvents::init()
 
     s_opts().set_crtc_max( m_crtc_max );
 
+    m_tdopexpr_locs.clear();
+    m_comm_locs.clear();
+    m_eventnames_locs.clear();
+    m_gfxcontext_locs.clear();
+    m_gfxcontext_msg_locs.clear();
+    m_amd_timeline_locs.clear();
+    m_sched_switch_prev_locs.clear();
+    m_sched_switch_next_locs.clear();
+    m_sched_switch_cpu_locs.clear();
+    m_i915.reqwait_begin_locs.clear();
+    m_i915.reqwait_end_locs.clear();
+    m_i915.gem_req_locs.clear();
+    m_i915.req_locs.clear();
+
     {
         // Initialize events...
         GPUVIS_TRACE_BLOCKF( "init_new_events: %lu events", m_events.size() );
@@ -2061,6 +2084,29 @@ void TraceEvents::init()
             set_event_color( eventname.c_str(), color );
         }
     }
+}
+
+void TraceEvents::postmerge()
+{
+    // sanitize data
+
+    // sort new with old
+    auto sortfunc = []( const trace_event_t& a, const trace_event_t& b )
+    {
+        return a.ts < b.ts;
+    };
+    std::sort( m_events.begin(), m_events.end(), sortfunc );
+
+    // renumber ids
+    uint32_t idbase = 0;
+    for ( auto& e : m_events )
+    {
+        e.id = idbase++;
+    }
+
+    // rescan data
+
+    this->init();
 }
 
 void TraceEvents::remove_single_tgids()
