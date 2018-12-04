@@ -60,6 +60,15 @@ enum i915_type_t
 };
 i915_type_t get_i915_reqtype( const trace_event_t &event );
 
+enum tracefile_type_t
+{
+    TRACEFILE_Unspec,
+	TRACEFILE_ftrace,
+	TRACEFILE_nv,
+
+	TRACEFILE_Max
+};
+
 class TraceLocations
 {
 public:
@@ -1087,9 +1096,12 @@ public:
         SDL_atomic_t state = { 0 };
 
         std::string filename;
+        tracefile_type_t file_format = TRACEFILE_Unspec;
         TraceWin *win = nullptr;
         SDL_Thread *thread = nullptr;
         std::vector< std::string > inputfiles;
+
+        bool merge_load = false;
     };
     loading_info_t m_loading_info;
 

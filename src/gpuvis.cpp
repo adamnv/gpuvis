@@ -524,12 +524,15 @@ bool MainApp::load_file( const char *filename )
         return false;
     }
 
-    if ( ext && !strcmp( ext, ".zip" ) )
+    if ( ext && 0==strcasecmp( ext, ".zip" ) )
     {
         tmpfile = unzip_first_file( filename );
 
         if ( !tmpfile.empty() )
+        {
             filename = tmpfile.c_str();
+            ext = strrchr( filename, '.' );
+        }
     }
 
     size_t filesize = get_file_size( filename );
@@ -541,8 +544,20 @@ bool MainApp::load_file( const char *filename )
 
     set_state( State_Loading, filename );
 
-    delete m_trace_win;
-    m_trace_win = new TraceWin( filename, filesize );
+    // if we're loading a log and we already have a log loaded, merge them (FIXME: this should be explicitly decided at a higher level, not implicit here)
+    m_loading_info.merge_load = (NULL != m_trace_win);
+
+    m_loading_info.file_format = TRACEFILE_ftrace; // default
+    if (0==strcasecmp( ext, ".nvtrc" ))
+    {
+        m_loading_info.file_format = TRACEFILE_nv;
+    }
+
+    if (!m_loading_info.merge_load)
+    {
+        delete m_trace_win;
+        m_trace_win = new TraceWin( filename, filesize );
+    }
 
     m_loading_info.win = m_trace_win;
     m_loading_info.thread = SDL_CreateThread( thread_func, "eventloader", &m_loading_info );
@@ -647,6 +662,8 @@ int SDLCALL MainApp::thread_func( void *data )
     util_time_t t0 = util_get_time();
     loading_info_t *loading_info = ( loading_info_t *)data;
     TraceEvents &trace_events = loading_info->win->m_trace_events;
+    tracefile_type_t file_format = loading_info->file_format;
+    bool merge_load = loading_info->merge_load;
     const char *filename = loading_info->filename.c_str();
 
     {
