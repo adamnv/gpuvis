@@ -120,6 +120,8 @@ public:
     uint64_t db_key( const trace_event_t &event );
     uint64_t db_key( const char *ringstr, uint32_t seqno, const char *ctxstr );
 
+    void clear();
+
 public:
     // Map of db_key to array of event locations.
     util_umap< uint64_t, std::vector< uint32_t > > m_locs;

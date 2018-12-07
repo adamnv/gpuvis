@@ -140,6 +140,11 @@ uint64_t TraceLocationsRingCtxSeq::db_key( const trace_event_t &event )
     return 0;
 }
 
+void TraceLocationsRingCtxSeq::clear()
+{
+    m_locs.clear();
+}
+
 bool TraceLocationsRingCtxSeq::add_location( const trace_event_t &event )
 {
     uint64_t key = db_key( event );
