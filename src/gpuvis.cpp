@@ -449,9 +449,9 @@ bool MainApp::is_trace_loaded()
 void MainApp::set_state( state_t state, const char *filename )
 {
     if ( state == State_Loading )
-        m_loading_info.filename = filename;
+        m_loading_info.filename_in_progress = filename;
     else
-        m_loading_info.filename.clear();
+        m_loading_info.filename_in_progress.clear();
 
     m_loading_info.win = NULL;
     m_loading_info.thread = NULL;
@@ -516,54 +516,76 @@ static std::string unzip_first_file( const char *zipfile )
     return ret;
 }
 
-bool MainApp::load_file( const char *filename )
+bool MainApp::load_files( const std::vector< std::string> &filenames )
 {
-    GPUVIS_TRACE_BLOCKF( "%s: %s", __func__, filename );
+    GPUVIS_TRACE_BLOCKF( "%s: %d files", __func__, filenames.size() );
 
-    std::string tmpfile;
-    const char *ext = strrchr( filename, '.' );
+    std::vector < std::string > unpacked_filenames;
+    size_t total_filesize = 0;
 
-    if ( get_state() != State_Idle )
+    for (auto &filenamestr : filenames)
     {
-        logf( "[Error] %s failed, currently loading %s.", __func__, m_loading_info.filename.c_str() );
-        return false;
+        std::string tmpfile;
+        const char *cfilename = filenamestr.c_str();
+        const char *ext = strrchr( cfilename, '.' );
+
+        if ( get_state() != State_Idle )
+        {
+            logf( "[Error] %s failed, currently loading %s.", __func__, m_loading_info.filename_in_progress.c_str() );
+            return false;
+        }
+
+        if ( ext && 0==strcasecmp( ext, ".zip" ) )
+        {
+            tmpfile = unzip_first_file( cfilename );
+            if ( tmpfile.empty() )
+            {
+                logf( "[Error] %s (%s) unzip failed: %s", __func__, cfilename, strerror( errno ) );
+                return false;
+            }
+
+            cfilename = tmpfile.c_str();
+        }
+
+        size_t filesize = get_file_size( cfilename );
+        if ( 0 == filesize )
+        {
+            logf( "[Error] %s (%s) failed: %s", __func__, cfilename, strerror( errno ) );
+            return false;
+        }
+        total_filesize += filesize;
+
+        unpacked_filenames.push_back(cfilename);
     }
 
-    if ( ext && 0==strcasecmp( ext, ".zip" ) )
-    {
-        tmpfile = unzip_first_file( filename );
+    assert(!unpacked_filenames.empty());
 
-        if ( !tmpfile.empty() )
+    /*
+    for (auto &filestr : unpacked_filenames)
+    {
+        const char* filename = filestr.c_str();
+        const char *ext = strrchr( filename, '.' );
+
+        m_loading_info.UNUSED_file_format = TRACEFILE_ftrace; // default
+        if (0==strcasecmp( ext, ".nvtrc" ))
         {
-            filename = tmpfile.c_str();
-            ext = strrchr( filename, '.' );
+            m_loading_info.UNUSED_file_format = TRACEFILE_nv;
         }
     }
+    */
 
-    size_t filesize = get_file_size( filename );
-    if ( !filesize )
-    {
-        logf( "[Error] %s (%s) failed: %s", __func__, filename, strerror( errno ) );
-        return false;
-    }
-
-    set_state( State_Loading, filename );
+    set_state( State_Loading, unpacked_filenames[0].c_str() );
 
     // if we're loading a log and we already have a log loaded, merge them (FIXME: this should be explicitly decided at a higher level, not implicit here)
-    m_loading_info.merge_load = (NULL != m_trace_win);
+    //m_loading_info.UNUSED_merge_load = (NULL != m_trace_win);
 
-    m_loading_info.file_format = TRACEFILE_ftrace; // default
-    if (0==strcasecmp( ext, ".nvtrc" ))
-    {
-        m_loading_info.file_format = TRACEFILE_nv;
-    }
-
-    if (!m_loading_info.merge_load)
+    //if (!m_loading_info.UNUSED_merge_load)
     {
         delete m_trace_win;
-        m_trace_win = new TraceWin( filename, filesize );
+        m_trace_win = new TraceWin( unpacked_filenames, total_filesize );
     }
 
+    m_loading_info.inputfiles = unpacked_filenames;
     m_loading_info.win = m_trace_win;
     m_loading_info.thread = SDL_CreateThread( thread_func, "eventloader", &m_loading_info );
     if ( !m_loading_info.thread )
@@ -668,29 +690,53 @@ int SDLCALL MainApp::thread_func( void *data )
 
     loading_info_t *loading_info = ( loading_info_t *)data;
     TraceEvents &trace_events = loading_info->win->m_trace_events;
-    tracefile_type_t file_format = loading_info->file_format;
-    bool merge_load = loading_info->merge_load;
-    const char *filename = loading_info->filename.c_str();
+    //tracefile_type_t file_format = loading_info->UNUSED_file_format;
+    //bool merge_load = loading_info->UNUSED_merge_load;
 
+    trace_events.m_trace_info.trim_trace = s_opts().getb( OPT_TrimTrace );
+    assert(!trace_events.m_trace_info.trim_trace); // ADAM: just because not sure if this is the source of the default timestamp-normalization yet
+
+    EventCallback trace_cb = std::bind( &TraceEvents::new_event_cb, &trace_events, _1 );
+
+    for (auto &filenamestr : loading_info->inputfiles)
     {
-        GPUVIS_TRACE_BLOCKF( "read_trace_file: %s", filename );
+        const char* cfilename = filenamestr.c_str();
 
-        logf( "Reading trace file %s...", filename );
+        GPUVIS_TRACE_BLOCKF( "read_trace_file: %s", cfilename );
+        logf( "Reading trace file %s...", cfilename );
+        s_app().set_state( State_Loading, cfilename );
 
-        trace_events.m_trace_info.trim_trace = s_opts().getb( OPT_TrimTrace );
+        trace_info_t this_file_trace_info;
 
-        EventCallback trace_cb = std::bind( &TraceEvents::new_event_cb, &trace_events, _1 );
-        int ret = read_trace_file( filename, trace_events.m_strpool,
-                                   trace_events.m_trace_info, trace_cb );
-        if ( ret < 0 )
+        bool read_success = true;
+        const char *ext = strrchr( cfilename, '.' );
+        if ( 0 == strcasecmp( ext, ".nvtrc" ) )
         {
-            logf( "[Error] read_trace_file(%s) failed.", filename );
+            read_success = false; // ADAM: TODO: NV TRACE LOAD
+            assert(false);
+        }
+        else
+        {
+            int ret = read_trace_file( cfilename, trace_events.m_strpool,
+                                       this_file_trace_info, trace_cb );
+            if (ret < 0)
+            {
+                read_success = false;
+            }
+        }
+
+        if ( !read_success )
+        {
+            logf( "[Error] read_trace_file(%s) failed.", cfilename );
 
             // -1 means loading error
             SDL_AtomicSet( &trace_events.m_eventsloaded, -1 );
             s_app().set_state( State_Idle );
             return -1;
         }
+
+        trace_events.m_trace_info = this_file_trace_info; // ADAM:FIXME:PLACEHOLDER: merge infos properly instead of using last one!!
+        assert(false);
     }
 
     {
@@ -698,16 +744,16 @@ int SDLCALL MainApp::thread_func( void *data )
 
         float time_load = util_time_to_ms( t0, util_get_time() );
 
-        if (false && !merge_load) // FIXME - testing
+        //if (false && !merge_load) // FIXME - testing
         {
-            // Call TraceEvents::init() to initialize all events, etc.
-            trace_events.init();
+            // Call TraceEvents::init() to sort and initialize all events, etc.
+            trace_events.init(); // ADAM: FIXME: ensure init re-sorts
         }
-        else
-        {
-            // re-sort additional events etc
-            trace_events.postmerge();
-        }
+        //else
+        //{
+        //    // re-sort additional events etc
+        //    trace_events.postmerge();
+        //}
 
         float time_init = util_time_to_ms( t0, util_get_time() ) - time_load;
 
@@ -1142,11 +1188,8 @@ void MainApp::update()
 {
     if ( !m_loading_info.inputfiles.empty() && ( get_state() == State_Idle ) )
     {
-        const char *filename = m_loading_info.inputfiles[ 0 ].c_str();
-
-        load_file( filename );
-
-        m_loading_info.inputfiles.erase( m_loading_info.inputfiles.begin() );
+        load_files( m_loading_info.inputfiles );
+        m_loading_info.inputfiles.clear();
     }
 
     if ( ( m_font_main.m_changed || m_font_small.m_changed ) &&
@@ -2647,15 +2690,23 @@ static void remove_event_filter( char ( &dest )[ T ], const char *fmt, ... )
     str_strip_whitespace( dest );
 }
 
-TraceWin::TraceWin( const char *filename, size_t filesize )
+TraceWin::TraceWin( const std::vector<std::string> &filenames, size_t total_filesize )
 {
     // Note that m_trace_events is possibly being loaded in
     //  a background thread at this moment, so be sure to check
     //  m_eventsloaded before accessing it...
 
-    m_title = string_format( "%s (%.2f MB)", filename, filesize / ( 1024.0f * 1024.0f ) );
-    m_trace_events.m_filename = filename;
-    m_trace_events.m_filesize = filesize;
+    assert(!filenames.empty());
+    if ( filenames.size() == 1 )
+    {
+        m_title = string_format( "%s (%.2f MB)", filenames[0].c_str(), total_filesize / ( 1024.0f * 1024.0f ) );
+    }
+    else
+    {
+        m_title = string_format( "%s + %d more files (%.2f MB)", filenames[0].c_str(), filenames.size()-1, total_filesize / ( 1024.0f * 1024.0f ) );
+    }
+    m_trace_events.m_filenames = filenames;
+    m_trace_events.m_total_filesize = total_filesize;
 
     strcpy_safe( m_eventlist.timegoto_buf, "0.0" );
 
@@ -2763,7 +2814,7 @@ void TraceWin::render()
     }
     else
     {
-        ImGui::Text( "Error loading file %s...\n", m_trace_events.m_filename.c_str() );
+        ImGui::Text( "Error loading file %s...\n", m_trace_events.m_filenames[0].c_str() ); // ADAM:FIXME:this won't necessarily be the right filename
     }
 
     ImGui::End();
@@ -3811,9 +3862,13 @@ void TraceWin::graph_dialogs_render()
 
 static const std::string trace_info_label( TraceEvents &trace_events )
 {
-    const char *basename = get_path_filename( trace_events.m_filename.c_str() );
-
-    return string_format( "Info for '%s'", s_textclrs().bright_str( basename ).c_str() );
+    const char *basename = get_path_filename( trace_events.m_filenames[0].c_str() );
+    std::string label = string_format( "Info for '%s'", s_textclrs().bright_str( basename ).c_str() );
+    if ( trace_events.m_filenames.size()>1 )
+    {
+        label += string_format( " (merged with %d more file(s))", int( trace_events.m_filenames.size()-1 ) );
+    }
+    return label;
 }
 
 void MainApp::render_menu_options()
@@ -4377,7 +4432,8 @@ void MainApp::open_trace_dialog()
     else
     {
         const char *file = noc_file_dialog_open( NOC_FILE_DIALOG_OPEN,
-                                 "trace-cmd files (*.dat;*.trace)\0*.dat;*.trace\0",
+                                 "trace-cmd files (*.dat;*.trace)\0*.dat;*.trace\0"
+                                 "nvgpucs files (*.nvtrc)\0*.nvtrc\0",
                                  NULL, "trace.dat" );
 
         if ( file && file[ 0 ] )
@@ -4415,7 +4471,7 @@ void MainApp::render_menu( const char *str_id )
 
         if ( m_saving_info.title.empty() && is_trace_loaded() )
         {
-            std::string &filename = m_trace_win->m_trace_events.m_filename;
+            std::string &filename = m_trace_win->m_trace_events.m_filenames[0];
             const char *basename = get_path_filename( filename.c_str() );
             std::string label = string_format( "Copy '%s' to...", basename );
 

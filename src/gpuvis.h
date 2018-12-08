@@ -473,8 +473,8 @@ public:
     ftrace_row_info_t *get_ftrace_row_info( const char *row_name );
 
 public:
-    std::string m_filename;
-    size_t m_filesize = 0;
+    std::vector< std::string > m_filenames;
+    size_t m_total_filesize = 0;
 
     StrPool m_strpool;
     trace_info_t m_trace_info;
@@ -658,7 +658,7 @@ class graph_info_t;
 class TraceWin
 {
 public:
-    TraceWin( const char *filename, size_t filesize );
+    TraceWin( const std::vector<std::string> &filenames, size_t total_filesize );
     ~TraceWin();
 
 public:
@@ -669,6 +669,8 @@ public:
     {
         return m_trace_events.m_events[ id ];
     }
+
+    std::vector<std::string> get_filenames();
 
 protected:
     // Render events list
@@ -1060,7 +1062,7 @@ public:
     void init( int argc, char **argv );
     void shutdown( SDL_Window *window );
 
-    bool load_file( const char *filename );
+    bool load_files( const std::vector< std::string> &filenames );
     void cancel_load_file();
 
     // Trace file loaded and viewing?
@@ -1104,13 +1106,13 @@ public:
         // State_Idle, Loading, Loaded, CancelLoading
         SDL_atomic_t state = { 0 };
 
-        std::string filename;
-        tracefile_type_t file_format = TRACEFILE_Unspec;
+        std::string filename_in_progress;
+        tracefile_type_t UNUSED_file_format = TRACEFILE_Unspec;
         TraceWin *win = nullptr;
         SDL_Thread *thread = nullptr;
         std::vector< std::string > inputfiles;
 
-        bool merge_load = false;
+        bool UNUSED_merge_load = false;
     };
     loading_info_t m_loading_info;
 

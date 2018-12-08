@@ -2004,6 +2004,7 @@ int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_inf
             if ( last_record->ts >= trim_ts )
             {
                 cpu_info.events++;
+                __builtin_trap(); // ADAM: trace_enum_events() normalizes all the event timestamps, we want to do that AFTER we've loaded ALL traces
                 ret = trace_enum_events( trace_data, last_file_info->handle, last_record );
             }
 
