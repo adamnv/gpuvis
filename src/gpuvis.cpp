@@ -729,6 +729,8 @@ int SDLCALL MainApp::thread_func( void *data )
         {
             logf( "[Error] read_trace_file(%s) failed.", cfilename );
 
+            loading_info->inputfiles.clear();
+
             // -1 means loading error
             SDL_AtomicSet( &trace_events.m_eventsloaded, -1 );
             s_app().set_state( State_Idle );
@@ -767,6 +769,8 @@ int SDLCALL MainApp::thread_func( void *data )
         printf( "%s\n", str.c_str() );
 #endif
     }
+
+    loading_info->inputfiles.clear();
 
     // 0 means events have all all been loaded
     SDL_AtomicSet( &trace_events.m_eventsloaded, 0 );
@@ -1189,7 +1193,6 @@ void MainApp::update()
     if ( !m_loading_info.inputfiles.empty() && ( get_state() == State_Idle ) )
     {
         load_files( m_loading_info.inputfiles );
-        m_loading_info.inputfiles.clear();
     }
 
     if ( ( m_font_main.m_changed || m_font_small.m_changed ) &&
