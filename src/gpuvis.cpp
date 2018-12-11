@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <inttypes.h>
 #include <sys/stat.h>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -693,8 +694,11 @@ int SDLCALL MainApp::thread_func( void *data )
     //tracefile_type_t file_format = loading_info->UNUSED_file_format;
     //bool merge_load = loading_info->UNUSED_merge_load;
 
-    trace_events.m_trace_info.trim_trace = s_opts().getb( OPT_TrimTrace );
-    assert(!trace_events.m_trace_info.trim_trace); // ADAM: just because not sure if this is the source of the default timestamp-normalization yet
+    trace_info_t &trace_info_output = trace_events.m_trace_info;
+    trace_info_output.trim_trace = s_opts().getb( OPT_TrimTrace );
+    //assert(!trace_info_output.trim_trace); // ADAM: just because not sure if this is the source of the default timestamp-normalization yet-  UGH IT IS SET
+
+    std::vector<trace_info_t> inputfiles_traceinfos;
 
     EventCallback trace_cb = std::bind( &TraceEvents::new_event_cb, &trace_events, _1 );
 
@@ -706,7 +710,9 @@ int SDLCALL MainApp::thread_func( void *data )
         logf( "Reading trace file %s...", cfilename );
         s_app().set_state( State_Loading, cfilename );
 
-        trace_info_t this_file_trace_info;
+        inputfiles_traceinfos.emplace_back();
+        trace_info_t &this_file_trace_info = inputfiles_traceinfos.back();
+        this_file_trace_info.trim_trace = trace_info_output.trim_trace;
 
         bool read_success = true;
         const char *ext = strrchr( cfilename, '.' );
@@ -736,10 +742,90 @@ int SDLCALL MainApp::thread_func( void *data )
             s_app().set_state( State_Idle );
             return -1;
         }
-
-        trace_events.m_trace_info = this_file_trace_info; // ADAM:FIXME:PLACEHOLDER: merge infos properly instead of using last one!!
-        assert(false);
     }
+
+    assert(loading_info->inputfiles.size() == inputfiles_traceinfos.size());
+
+     // ADAM:FIXME: merge infos properly
+    //assert(false);
+    // SKETCH:
+    //1. sanity-check compatiblity of merged traces
+    for (const trace_info_t& traceinfo : inputfiles_traceinfos)
+    {
+        if (traceinfo.cpus != inputfiles_traceinfos[0].cpus)
+        {
+            logf( "[Warning] merged traces come from sources with mismatched cpu counts.");
+            assert(false);//ADAM
+        }
+        if (traceinfo.uname != inputfiles_traceinfos[0].uname)
+        {
+            logf( "[Warning] merged traces come from sources with mismatched unames.");
+            assert(false);//ADAM
+        }
+        if (traceinfo.timestamp_in_us != inputfiles_traceinfos[0].timestamp_in_us)
+        {
+            // this doesn't really need to be terminal - no other code in gpuvis right now seems to care - but it would be extremely confusing
+            logf( "[Error] read_trace_file(%s) failed; merged traces are based on different units of time.", traceinfo.file.c_str());
+            assert(false);//ADAM
+
+            // -1 means loading error
+            SDL_AtomicSet( &trace_events.m_eventsloaded, -1 );
+            s_app().set_state( State_Idle );
+            return -1;
+        }
+    }
+
+    // sanity-check consistency of log time ranges and cache them
+    std::vector<int64_t> min_ts, max_ts;
+    uint32_t max_cpus_found = 0;
+    max_ts.resize(inputfiles_traceinfos.size());
+    min_ts.resize(inputfiles_traceinfos.size());
+    for (unsigned int i=0; i<inputfiles_traceinfos.size(); ++i)
+    {
+        int64_t per_cpu_min_ts = INT64_MAX;
+        int64_t per_cpu_max_ts = 0;
+
+        // sanity-check consistency of cpu counts while we're here!
+        assert(inputfiles_traceinfos[i].cpu_info.size() == inputfiles_traceinfos[i].cpus);
+        max_cpus_found = std::max(max_cpus_found, inputfiles_traceinfos[i].cpus);
+
+        for (auto cpuinfo : inputfiles_traceinfos[i].cpu_info)
+        {
+            per_cpu_max_ts = std::max(per_cpu_max_ts, cpuinfo.max_ts);
+            per_cpu_min_ts = std::min(per_cpu_min_ts, cpuinfo.min_ts);
+        }
+        // verify that file's idea of min ts is the same as derived from per-cpu min ts
+        assert(per_cpu_min_ts == inputfiles_traceinfos[i].min_file_ts);
+
+        min_ts[i] = per_cpu_min_ts;
+        max_ts[i] = per_cpu_max_ts;
+    }
+
+    // check log time ranges for disjointedness as another sanity check
+    if (inputfiles_traceinfos.size() > 1)
+    {
+        for (unsigned int i=0; i<inputfiles_traceinfos.size(); ++i)
+        {
+            int64_t min_disjointedness_found = INT64_MAX;
+            for (unsigned int j=i; j<inputfiles_traceinfos.size(); ++j)
+            {
+                int64_t gap = std::max(min_ts[i],min_ts[j]) - std::min(max_ts[i],max_ts[j]);
+                min_disjointedness_found = std::min(min_disjointedness_found, gap);
+            }
+
+            if (min_disjointedness_found > 0)
+            {
+                logf( "[Warning] trace(%s) is %" PRId64 "us disjoint from any other trace's time range", inputfiles_traceinfos[i].file.c_str(), min_disjointedness_found);
+                assert(false);//ADAM
+            }
+        }
+    }
+
+    //ADAM:FIXME: write merged version to trace_events.m_trace_info
+    assert(false);
+
+    //ADAM:FIXME: then postprocess all events (renormalize times, maybe more?)
+    assert(false);
 
     {
         GPUVIS_TRACE_BLOCK( "trace_init_or_merge" );
@@ -4618,7 +4704,6 @@ void MainApp::parse_cmdline( int argc, char **argv )
                 s_opts().setf( OPT_Scale, atof( ya_optarg ) );
             break;
         case 'i':
-            m_loading_info.inputfiles.clear();
             m_loading_info.inputfiles.push_back( ya_optarg );
             break;
 
@@ -4629,7 +4714,6 @@ void MainApp::parse_cmdline( int argc, char **argv )
 
     for ( ; ya_optind < argc; ya_optind++ )
     {
-        m_loading_info.inputfiles.clear();
         m_loading_info.inputfiles.push_back( argv[ ya_optind ] );
     }
 }

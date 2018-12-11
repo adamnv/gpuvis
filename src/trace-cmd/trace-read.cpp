@@ -1653,7 +1653,7 @@ static int trace_enum_events( trace_data_t &trace_data, tracecmd_input_t *handle
         trace_event.pid = pid;
         trace_event.id = trace_data.events++;
         trace_event.cpu = record->cpu;
-        trace_event.ts = record->ts - trace_data.trace_info.min_file_ts;
+        trace_event.ts = record->ts;// ADAM:NERF NORMALIZATION OF TS, WE DON'T HAVE THE FULL RANGE YET - trace_data.trace_info.min_file_ts;
 
         trace_event.comm = strpool.getstrf( "%s-%u", comm, pid );
 
@@ -1963,7 +1963,7 @@ int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_inf
 
         if ( record )
         {
-            cpu_info.min_ts = record->ts - trace_info.min_file_ts;
+            cpu_info.min_ts = record->ts;//ADAM - trace_info.min_file_ts;
 
             if ( cpu_info.overrun && trace_info.trim_trace )
                 trim_ts = std::max< unsigned long long >( trim_ts, record->ts );
@@ -1998,13 +1998,12 @@ int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_inf
             cpu_info.tot_events++;
 
             // Store the max ts value we've seen for this cpu
-            cpu_info.max_ts = last_record->ts - trace_info.min_file_ts;
+            cpu_info.max_ts = last_record->ts;//ADAM - trace_info.min_file_ts;
 
             // If this ts is greater than our trim value, add it.
             if ( last_record->ts >= trim_ts )
             {
                 cpu_info.events++;
-                __builtin_trap(); // ADAM: trace_enum_events() normalizes all the event timestamps, we want to do that AFTER we've loaded ALL traces
                 ret = trace_enum_events( trace_data, last_file_info->handle, last_record );
             }
 
