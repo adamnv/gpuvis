@@ -755,12 +755,12 @@ int SDLCALL MainApp::thread_func( void *data )
         if (traceinfo.cpus != inputfiles_traceinfos[0].cpus)
         {
             logf( "[Warning] merged traces come from sources with mismatched cpu counts.");
-            assert(false);//ADAM
+            //assert(false);//ADAM
         }
         if (traceinfo.uname != inputfiles_traceinfos[0].uname)
         {
             logf( "[Warning] merged traces come from sources with mismatched unames.");
-            assert(false);//ADAM
+            //assert(false);//ADAM
         }
         if (traceinfo.timestamp_in_us != inputfiles_traceinfos[0].timestamp_in_us)
         {
@@ -807,7 +807,7 @@ int SDLCALL MainApp::thread_func( void *data )
         for (unsigned int i=0; i<inputfiles_traceinfos.size(); ++i)
         {
             int64_t min_disjointedness_found = INT64_MAX;
-            for (unsigned int j=i; j<inputfiles_traceinfos.size(); ++j)
+            for (unsigned int j=i+1; j<inputfiles_traceinfos.size(); ++j)
             {
                 int64_t gap = std::max(min_ts[i],min_ts[j]) - std::min(max_ts[i],max_ts[j]);
                 min_disjointedness_found = std::min(min_disjointedness_found, gap);
@@ -816,7 +816,7 @@ int SDLCALL MainApp::thread_func( void *data )
             if (min_disjointedness_found > 0)
             {
                 logf( "[Warning] trace(%s) is %" PRId64 "us disjoint from any other trace's time range", inputfiles_traceinfos[i].file.c_str(), min_disjointedness_found);
-                assert(false);//ADAM
+                //assert(false);//ADAM
             }
         }
     }
