@@ -478,7 +478,7 @@ public:
 
     StrPool m_strpool;
     trace_info_t m_trace_info;
-    std::vector< trace_event_t > m_events;
+    std::unordered_map< uint32_t, trace_event_t > m_events;
 
     // Max drm_vblank_event crc value we've seen
     int m_crtc_max = -1;

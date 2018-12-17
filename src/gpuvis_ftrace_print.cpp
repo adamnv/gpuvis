@@ -513,6 +513,8 @@ void TraceEvents::calculate_event_print_info()
     {
         row_pos_t *prow_pos;
         trace_event_t &event = m_events[ idx ];
+        // !! NOTE: locs are ids but we're treating them as indices
+        assert(event.id == idx);
         print_info_t *print_info = m_ftrace.print_info.get_val( event.id );
         assert(print_info);
         int64_t min_ts = print_info->ts;

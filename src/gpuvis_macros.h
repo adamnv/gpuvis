@@ -23,6 +23,7 @@
  */
 #ifndef GPUVIS_MACROS_H_
 #define GPUVIS_MACROS_H_
+#include <assert.h>//ADAM
 
 // Disable gpuvis ftrace tracing by default
 #define GPUVIS_TRACE_UTILS_DISABLE
@@ -136,6 +137,7 @@ public:
         auto i = m_map.find( key );
         if ( i != m_map.end() )
             return &i->second;
+        assert(false);//ADAM
         return NULL;
     }
 

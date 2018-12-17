@@ -701,6 +701,7 @@ int SDLCALL MainApp::thread_func( void *data )
     std::vector<trace_info_t> inputfiles_traceinfos;
 
     EventCallback trace_cb = std::bind( &TraceEvents::new_event_cb, &trace_events, _1 );
+    uint32_t event_id_base = 0;
 
     for (auto &filenamestr : loading_info->inputfiles)
     {
@@ -724,7 +725,7 @@ int SDLCALL MainApp::thread_func( void *data )
         else
         {
             int ret = read_trace_file( cfilename, trace_events.m_strpool,
-                                       this_file_trace_info, trace_cb );
+                                       this_file_trace_info, trace_cb, /*inout*/ event_id_base );
             if (ret < 0)
             {
                 read_success = false;
@@ -768,6 +769,8 @@ int SDLCALL MainApp::thread_func( void *data )
             logf( "[Error] read_trace_file(%s) failed; merged traces are based on different units of time.", traceinfo.file.c_str());
             assert(false);//ADAM
 
+            loading_info->inputfiles.clear();
+
             // -1 means loading error
             SDL_AtomicSet( &trace_events.m_eventsloaded, -1 );
             s_app().set_state( State_Idle );
@@ -807,10 +810,13 @@ int SDLCALL MainApp::thread_func( void *data )
         for (unsigned int i=0; i<inputfiles_traceinfos.size(); ++i)
         {
             int64_t min_disjointedness_found = INT64_MAX;
-            for (unsigned int j=i+1; j<inputfiles_traceinfos.size(); ++j)
+            for (unsigned int j=0; j<inputfiles_traceinfos.size(); ++j)
             {
-                int64_t gap = std::max(min_ts[i],min_ts[j]) - std::min(max_ts[i],max_ts[j]);
-                min_disjointedness_found = std::min(min_disjointedness_found, gap);
+                if (i!=j)
+                {
+                    int64_t gap = std::max(min_ts[i],min_ts[j]) - std::min(max_ts[i],max_ts[j]);
+                    min_disjointedness_found = std::min(min_disjointedness_found, gap);
+                }
             }
 
             if (min_disjointedness_found > 0)
@@ -822,10 +828,49 @@ int SDLCALL MainApp::thread_func( void *data )
     }
 
     //ADAM:FIXME: write merged version to trace_events.m_trace_info
-    assert(false);
+    // SKETCH:
+    assert(!inputfiles_traceinfos.empty());
+    trace_info_output = inputfiles_traceinfos[0];
+    trace_info_output.cpus = max_cpus_found;
+    trace_info_output.cpu_info.resize(trace_info_output.cpus);
+    for (unsigned int i=1; i<inputfiles_traceinfos.size(); ++i)
+    {
+        trace_info_t &this_file_trace_info = inputfiles_traceinfos[i];
+        trace_info_output.file += " + " + this_file_trace_info.file;
+        trace_info_output.uname += " + " + this_file_trace_info.uname;
+
+        for (unsigned int j=0; i<this_file_trace_info.cpu_info.size(); ++i)
+        {
+            cpu_info_t &this_cpu_info = this_file_trace_info.cpu_info[j];
+            trace_info_output.cpu_info[j].entries += this_cpu_info.entries;
+            trace_info_output.cpu_info[j].overrun += this_cpu_info.overrun;
+            trace_info_output.cpu_info[j].commit_overrun += this_cpu_info.commit_overrun;
+            trace_info_output.cpu_info[j].bytes += this_cpu_info.bytes;
+            trace_info_output.cpu_info[j].oldest_event_ts = std::min(this_cpu_info.oldest_event_ts, trace_info_output.cpu_info[j].oldest_event_ts);
+            trace_info_output.cpu_info[j].now_ts = std::max(this_cpu_info.now_ts, trace_info_output.cpu_info[j].now_ts);
+            trace_info_output.cpu_info[j].dropped_events += this_cpu_info.dropped_events;
+            trace_info_output.cpu_info[j].read_events += this_cpu_info.read_events;
+            trace_info_output.cpu_info[j].file_offset = 0; // n/a
+            trace_info_output.cpu_info[j].file_size = 0; // n/a
+            trace_info_output.cpu_info[j].min_ts = std::min(this_cpu_info.min_ts, trace_info_output.cpu_info[j].min_ts);
+            trace_info_output.cpu_info[j].max_ts = std::max(this_cpu_info.max_ts, trace_info_output.cpu_info[j].max_ts);
+            trace_info_output.cpu_info[j].events += this_cpu_info.events;
+            trace_info_output.cpu_info[j].tot_events += this_cpu_info.tot_events;
+        }
+
+        trace_info_output.min_file_ts = std::min(this_file_trace_info.min_file_ts, trace_info_output.min_file_ts);
+        trace_info_output.trim_trace = trace_info_output.trim_trace || this_file_trace_info.trim_trace;
+        trace_info_output.trimmed_ts = std::min(this_file_trace_info.trimmed_ts, trace_info_output.trimmed_ts);
+
+        // note: merged pid-related results could be pretty misleading if logs aren't actually from the same machine and in a similar timeframe :(
+        trace_info_output.tgid_pids.m_map.insert(this_file_trace_info.tgid_pids.m_map.begin(), this_file_trace_info.tgid_pids.m_map.end());
+        trace_info_output.pid_tgid_map.m_map.insert(this_file_trace_info.pid_tgid_map.m_map.begin(), this_file_trace_info.pid_tgid_map.m_map.end());
+        trace_info_output.pid_comm_map.m_map.insert(this_file_trace_info.pid_comm_map.m_map.begin(), this_file_trace_info.pid_comm_map.m_map.end());
+        trace_info_output.sched_switch_pid_comm_map.m_map.insert(this_file_trace_info.sched_switch_pid_comm_map.m_map.begin(), this_file_trace_info.sched_switch_pid_comm_map.m_map.end());
+    }
 
     //ADAM:FIXME: then postprocess all events (renormalize times, maybe more?)
-    assert(false);
+    //assert(false);
 
     {
         GPUVIS_TRACE_BLOCK( "trace_init_or_merge" );
@@ -835,12 +880,12 @@ int SDLCALL MainApp::thread_func( void *data )
         //if (false && !merge_load) // FIXME - testing
         {
             // Call TraceEvents::init() to sort and initialize all events, etc.
-            trace_events.init(); // ADAM: FIXME: ensure init re-sorts
+            //trace_events.init(); // ADAM: FIXME: ensure init re-sorts by ts
         }
         //else
         //{
-        //    // re-sort additional events etc
-        //    trace_events.postmerge();
+        //    // re-sort and rename additional events etc
+            trace_events.postmerge();
         //}
 
         float time_init = util_time_to_ms( t0, util_get_time() ) - time_load;
@@ -2234,14 +2279,7 @@ void TraceEvents::postmerge()
     };
     std::sort( m_events.begin(), m_events.end(), sortfunc );
 
-    // renumber ids
-    uint32_t idbase = 0;
-    for ( auto& e : m_events )
-    {
-        e.id = idbase++;
-    }
-
-    // rescan data
+    // (re)scan data
 
     this->init();
 }
