@@ -464,7 +464,8 @@ public:
     void init_amd_timeline_event( trace_event_t &event );
     void init_i915_event( trace_event_t &event );
 
-    int new_event_cb( const trace_event_t &event );
+    int event_add_cb( const trace_event_t &event );
+    void event_postload_pass( const trace_event_t &event );
     void new_event_ftrace_print( trace_event_t &event );
 
     ftrace_row_info_t *get_ftrace_row_info_pid( int pid, bool add = false );
@@ -478,7 +479,7 @@ public:
 
     StrPool m_strpool;
     trace_info_t m_trace_info;
-    std::unordered_map< uint32_t, trace_event_t > m_events;
+    std::vector< trace_event_t > m_events;
 
     // Max drm_vblank_event crc value we've seen
     int m_crtc_max = -1;

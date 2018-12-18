@@ -1569,8 +1569,8 @@ extern "C" void print_str_arg( struct trace_seq *s, void *data, int size,
 class trace_data_t
 {
 public:
-    trace_data_t( EventCallback &_cb, trace_info_t &_trace_info, StrPool &_strpool, uint32_t _event_id_base ) :
-        cb( _cb ), trace_info( _trace_info ), strpool( _strpool ), event_id_base( _event_id_base )
+    trace_data_t( EventCallback &_cb, StrPool &_strpool ) :
+        cb( _cb ), strpool( _strpool )
     {
         seqno_str = strpool.getstr( "seqno" );
         crtc_str = strpool.getstr( "crtc" );
@@ -1586,11 +1586,8 @@ public:
 
 public:
     EventCallback &cb;
-    trace_info_t &trace_info;
     StrPool &strpool;
 
-    uint32_t event_id_base = 0;
-    uint32_t events = 0;
     const char *seqno_str;
     const char *crtc_str;
     const char *ip_str;
@@ -1652,8 +1649,9 @@ static int trace_enum_events( trace_data_t &trace_data, tracecmd_input_t *handle
         trace_seq_init( &seq );
 
         trace_event.pid = pid;
-        trace_event.id = trace_data.event_id_base + trace_data.events;
-        trace_data.events++;
+        //trace_event.id = trace_data.event_id_base + trace_data.events;
+        trace_event.id = INVALID_ID; // valid ids will be generated later
+        //trace_data.events++;
         trace_event.cpu = record->cpu;
         trace_event.ts = record->ts;// ADAM:NERF NORMALIZATION OF TS, WE DON'T HAVE THE FULL RANGE YET - trace_data.trace_info.min_file_ts;
 
@@ -1972,7 +1970,7 @@ int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_inf
         }
     }
 
-    trace_data_t trace_data( cb, trace_info, strpool, event_id_base );
+    trace_data_t trace_data( cb, strpool );
 
     for ( ;; )
     {
@@ -2027,7 +2025,7 @@ int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_inf
     }
     file_list.clear();
 
-    event_id_base += trace_data.events;
+    //event_id_base += trace_data.events;
 
     return 0;
 }

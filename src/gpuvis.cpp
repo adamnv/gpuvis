@@ -658,11 +658,20 @@ TraceEvents::~TraceEvents()
 
 // Callback from trace_read.cpp. We mostly just store the events in our array
 //  and then init_new_event() does the real work of initializing them later.
-int TraceEvents::new_event_cb( const trace_event_t &event )
+int TraceEvents::event_add_cb( const trace_event_t &event )
 {
     // Add event to our m_events array
     m_events.push_back( event );
 
+    // 1+ means loading events
+    SDL_AtomicAdd( &m_eventsloaded, 1 );
+
+    // Return 1 to cancel loading
+    return ( s_app().get_state() == MainApp::State_CancelLoading );
+}
+
+void TraceEvents::event_postload_pass(const trace_event_t &event)
+{
     // If this is a sched_switch event, see if it has comm info we don't know about.
     // This is the reason we're initializing events in two passes to collect all this data.
     if ( event.is_sched_switch() )
@@ -677,12 +686,6 @@ int TraceEvents::new_event_cb( const trace_event_t &event )
 
     // Record the maximum crtc value we've ever seen
     m_crtc_max = std::max< int >( m_crtc_max, event.crtc );
-
-    // 1+ means loading events
-    SDL_AtomicAdd( &m_eventsloaded, 1 );
-
-    // Return 1 to cancel loading
-    return ( s_app().get_state() == MainApp::State_CancelLoading );
 }
 
 int SDLCALL MainApp::thread_func( void *data )
@@ -700,7 +703,7 @@ int SDLCALL MainApp::thread_func( void *data )
 
     std::vector<trace_info_t> inputfiles_traceinfos;
 
-    EventCallback trace_cb = std::bind( &TraceEvents::new_event_cb, &trace_events, _1 );
+    EventCallback trace_cb = std::bind( &TraceEvents::event_add_cb, &trace_events, _1 );
     uint32_t event_id_base = 0;
 
     for (auto &filenamestr : loading_info->inputfiles)
@@ -868,9 +871,6 @@ int SDLCALL MainApp::thread_func( void *data )
         trace_info_output.pid_comm_map.m_map.insert(this_file_trace_info.pid_comm_map.m_map.begin(), this_file_trace_info.pid_comm_map.m_map.end());
         trace_info_output.sched_switch_pid_comm_map.m_map.insert(this_file_trace_info.sched_switch_pid_comm_map.m_map.begin(), this_file_trace_info.sched_switch_pid_comm_map.m_map.end());
     }
-
-    //ADAM:FIXME: then postprocess all events (renormalize times, maybe more?)
-    //assert(false);
 
     {
         GPUVIS_TRACE_BLOCK( "trace_init_or_merge" );
@@ -2206,6 +2206,11 @@ void TraceEvents::init()
     // Set m_eventsloaded initializing bit
     SDL_AtomicSet( &m_eventsloaded, 0x40000000 );
 
+    for ( const trace_event_t& event : m_events )
+    {
+        event_postload_pass( event );
+    }
+
     m_vblank_info.resize( m_crtc_max + 1 );
 
     s_opts().set_crtc_max( m_crtc_max );
@@ -2272,12 +2277,19 @@ void TraceEvents::postmerge()
 {
     // sanitize data
 
-    // sort new with old
+    // sort big pile of data - from potentially disparate sources - by ts
     auto sortfunc = []( const trace_event_t& a, const trace_event_t& b )
     {
         return a.ts < b.ts;
     };
     std::sort( m_events.begin(), m_events.end(), sortfunc );
+
+    // generate event ids
+    for ( uint32_t idx = 0; idx < m_events.size(); ++idx )
+    {
+        assert( m_events[ idx ].id == INVALID_ID );
+        m_events[ idx ].id = idx;
+    }
 
     // (re)scan data
 
