@@ -47,6 +47,8 @@
 #include "tdopexpr.h"
 #include "trace-cmd/trace-read.h"
 
+#include "gpuvis-nvtrc.h"
+
 #include "stlini.h"
 #include "gpuvis_utils.h"
 #include "gpuvis.h"
@@ -699,12 +701,10 @@ int SDLCALL MainApp::thread_func( void *data )
 
     trace_info_t &trace_info_output = trace_events.m_trace_info;
     trace_info_output.trim_trace = s_opts().getb( OPT_TrimTrace );
-    //assert(!trace_info_output.trim_trace); // ADAM: just because not sure if this is the source of the default timestamp-normalization yet-  UGH IT IS SET
 
     std::vector<trace_info_t> inputfiles_traceinfos;
 
     EventCallback trace_cb = std::bind( &TraceEvents::event_add_cb, &trace_events, _1 );
-    uint32_t event_id_base = 0;
 
     for (auto &filenamestr : loading_info->inputfiles)
     {
@@ -722,13 +722,12 @@ int SDLCALL MainApp::thread_func( void *data )
         const char *ext = strrchr( cfilename, '.' );
         if ( 0 == strcasecmp( ext, ".nvtrc" ) )
         {
-            read_success = false; // ADAM: TODO: NV TRACE LOAD
-            assert(false);
+            read_success = read_nvtrc_file( cfilename, trace_events.m_strpool, this_file_trace_info, trace_cb );
         }
         else
         {
             int ret = read_trace_file( cfilename, trace_events.m_strpool,
-                                       this_file_trace_info, trace_cb, /*inout*/ event_id_base );
+                                       this_file_trace_info, trace_cb );
             if (ret < 0)
             {
                 read_success = false;
@@ -759,18 +758,15 @@ int SDLCALL MainApp::thread_func( void *data )
         if (traceinfo.cpus != inputfiles_traceinfos[0].cpus)
         {
             logf( "[Warning] merged traces come from sources with mismatched cpu counts.");
-            //assert(false);//ADAM
         }
         if (traceinfo.uname != inputfiles_traceinfos[0].uname)
         {
             logf( "[Warning] merged traces come from sources with mismatched unames.");
-            //assert(false);//ADAM
         }
         if (traceinfo.timestamp_in_us != inputfiles_traceinfos[0].timestamp_in_us)
         {
             // this doesn't really need to be terminal - no other code in gpuvis right now seems to care - but it would be extremely confusing
             logf( "[Error] read_trace_file(%s) failed; merged traces are based on different units of time.", traceinfo.file.c_str());
-            assert(false);//ADAM
 
             loading_info->inputfiles.clear();
 
@@ -795,16 +791,19 @@ int SDLCALL MainApp::thread_func( void *data )
         assert(inputfiles_traceinfos[i].cpu_info.size() == inputfiles_traceinfos[i].cpus);
         max_cpus_found = std::max(max_cpus_found, inputfiles_traceinfos[i].cpus);
 
-        for (auto cpuinfo : inputfiles_traceinfos[i].cpu_info)
+        if ( !inputfiles_traceinfos[i].cpu_info.empty() )
         {
-            per_cpu_max_ts = std::max(per_cpu_max_ts, cpuinfo.max_ts);
-            per_cpu_min_ts = std::min(per_cpu_min_ts, cpuinfo.min_ts);
-        }
-        // verify that file's idea of min ts is the same as derived from per-cpu min ts
-        assert(per_cpu_min_ts == inputfiles_traceinfos[i].min_file_ts);
+            for (auto cpuinfo : inputfiles_traceinfos[i].cpu_info)
+            {
+                per_cpu_max_ts = std::max(per_cpu_max_ts, cpuinfo.max_ts);
+                per_cpu_min_ts = std::min(per_cpu_min_ts, cpuinfo.min_ts);
+            }
+            // verify that file's idea of min ts is the same as derived from per-cpu min ts
+            assert(per_cpu_min_ts == inputfiles_traceinfos[i].min_file_ts);
 
-        min_ts[i] = per_cpu_min_ts;
-        max_ts[i] = per_cpu_max_ts;
+            min_ts[i] = per_cpu_min_ts;
+            max_ts[i] = per_cpu_max_ts;
+        }
     }
 
     // check log time ranges for disjointedness as another sanity check
@@ -830,7 +829,7 @@ int SDLCALL MainApp::thread_func( void *data )
         }
     }
 
-    //ADAM:FIXME: write merged version to trace_events.m_trace_info
+    //ADAM:checkme: write merged version to trace_events.m_trace_info
     // SKETCH:
     assert(!inputfiles_traceinfos.empty());
     trace_info_output = inputfiles_traceinfos[0];
@@ -842,7 +841,7 @@ int SDLCALL MainApp::thread_func( void *data )
         trace_info_output.file += " + " + this_file_trace_info.file;
         trace_info_output.uname += " + " + this_file_trace_info.uname;
 
-        for (unsigned int j=0; i<this_file_trace_info.cpu_info.size(); ++i)
+        for (unsigned int j=0; j<this_file_trace_info.cpu_info.size(); ++j)
         {
             cpu_info_t &this_cpu_info = this_file_trace_info.cpu_info[j];
             trace_info_output.cpu_info[j].entries += this_cpu_info.entries;
@@ -861,9 +860,9 @@ int SDLCALL MainApp::thread_func( void *data )
             trace_info_output.cpu_info[j].tot_events += this_cpu_info.tot_events;
         }
 
-        trace_info_output.min_file_ts = std::min(this_file_trace_info.min_file_ts, trace_info_output.min_file_ts);
+        trace_info_output.min_file_ts = std::min(this_file_trace_info.min_file_ts, trace_info_output.min_file_ts); // ?
         trace_info_output.trim_trace = trace_info_output.trim_trace || this_file_trace_info.trim_trace;
-        trace_info_output.trimmed_ts = std::min(this_file_trace_info.trimmed_ts, trace_info_output.trimmed_ts);
+        trace_info_output.trimmed_ts = std::min(this_file_trace_info.trimmed_ts, trace_info_output.trimmed_ts); // ?
 
         // note: merged pid-related results could be pretty misleading if logs aren't actually from the same machine and in a similar timeframe :(
         trace_info_output.tgid_pids.m_map.insert(this_file_trace_info.tgid_pids.m_map.begin(), this_file_trace_info.tgid_pids.m_map.end());

@@ -1843,7 +1843,7 @@ static int64_t getf64( const char *str, const char *var )
     return 0;
 }
 
-int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_info, EventCallback &cb, uint32_t &event_id_base )
+int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_info, EventCallback &cb )
 {
     GPUVIS_TRACE_BLOCK( __func__ );
 

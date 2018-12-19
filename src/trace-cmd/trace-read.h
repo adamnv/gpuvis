@@ -227,4 +227,4 @@ const char *get_event_field_val( const trace_event_t &event, const char *name, c
 event_field_t *get_event_field( trace_event_t &event, const char *name );
 
 typedef std::function< int ( const trace_event_t &event ) > EventCallback;
-int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_info, EventCallback &cb, uint32_t &event_id_base );
+int read_trace_file( const char *file, StrPool &strpool, trace_info_t &trace_info, EventCallback &cb );
