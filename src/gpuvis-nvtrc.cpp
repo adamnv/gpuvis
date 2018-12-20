@@ -88,16 +88,26 @@ void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::Fi
         {
             const std::string namehack[] = {"Invalid", "ContextSwitchedIn", "ContextSwitchedOut"};
             trace_event_t adapted;
-            adapted.id = INVALID_ID;
-            adapted.ts = rdtsc_to_us(record.timestamp);
-            adapted.cpu = 0;
+
             adapted.pid = record.processId;
-            adapted.comm = strpool.getstr("(eventcomm)");
-            adapted.crtc = 0; //?
-            adapted.name = strpool.getstr(std::string("(eventname:" + namehack[int(record.type)] + ")").c_str());
-            adapted.color = 0xFFFFFFFF; //?
-            adapted.flags = 0; //?
+            adapted.id = INVALID_ID;
+            adapted.cpu = 0;
+            adapted.ts = rdtsc_to_us(record.timestamp);
+
+            adapted.flags = TRACE_FLAG_AUTOGEN_COLOR; // maybe TRACE_FLAG_SCHED_SWITCH, swqueue, hwqueue...
             adapted.seqno = 0; //?
+            adapted.id_start = INVALID_ID;
+            adapted.graph_row_id = 0;
+            adapted.crtc = -1;
+
+            adapted.color = 0; // == default
+
+            adapted.duration = INT64_MAX; // == 'not set'
+
+            adapted.comm = strpool.getstr("(event_comm)"); // command name
+            adapted.system = strpool.getstr("nvcontext"); // event system
+            adapted.name = strpool.getstr(std::string("(event_name:" + namehack[int(record.type)] + ")").c_str()); // event name
+            adapted.user_comm = strpool.getstr("(event_usercomm)");
 
             cb(adapted);
         }
