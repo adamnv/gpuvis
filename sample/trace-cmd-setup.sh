@@ -41,6 +41,7 @@ ROOT_CMDS=
 TRACEFS="/sys/kernel/tracing"
 
 TRACECMD=
+NVGPUCSCMD=
 
 # Using command -v to get trace-cmd path:
 #  https://stackoverflow.com/questions/592620/check-if-a-program-exists-from-a-bash-script
@@ -63,6 +64,30 @@ else
 
     ROOT_CMDS+="# Add setuid bit to trace-cmd binary\n"
     ROOT_CMDS+="chmod u+s ${TRACECMD}\n\n"
+fi
+
+if [ -x "$(command -v nvgpucs)" ]; then
+    NVGPUCSCMD=$(readlink -f "$(command -v nvgpucs)")
+else
+	if [ -x "./nvgpucs" ]; then
+		NVGPUCSCMD=$(readlink -f ./nvgpucs)
+	fi
+fi
+
+if [ -z "${NVGPUCSCMD}" ]; then
+    echo "WARNING: Could not locate nvgpucs binary"
+else
+	if [ -u "${NVGPUCSCMD}" ] && [ "$(stat -c %U ${NVGPUCSCMD})" == "root" ] ; then
+		# nvgpucs owner and setuid set
+		:
+	else
+		# nvgpucs owner or setuid not set
+		ROOT_CMDS+="# Make sure root owns nvgpucs\n"
+		ROOT_CMDS+="chown root:root ${NVGPUCSCMD}\n\n"
+	
+		ROOT_CMDS+="# Add setuid bit to trace-cmd binary\n"
+		ROOT_CMDS+="chmod u+s ${NVGPUCSCMD}\n\n"
+	fi
 fi
 
 # Check if tracefs dir is mounted

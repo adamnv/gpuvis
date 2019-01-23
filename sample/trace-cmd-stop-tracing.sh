@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pkexec `pwd`/nvgpucs -d -v -m stop
+`pwd`/nvgpucs -d -v -m stop
 
 CMD="trace-cmd reset"
 echo $CMD
