@@ -83,9 +83,10 @@ else
 	else
 		# nvgpucs owner or setuid not set
 		ROOT_CMDS+="# Make sure root owns nvgpucs\n"
-		ROOT_CMDS+="chown root:root ${NVGPUCSCMD}\n\n"
+		ROOT_CMDS+="chown root ${NVGPUCSCMD}\n\n"
 	
-		ROOT_CMDS+="# Add setuid bit to trace-cmd binary\n"
+		ROOT_CMDS+="# Add setuid bit to nvgpucs binary\n"
+		ROOT_CMDS+="chmod 454 ${NVGPUCSCMD}\n\n"
 		ROOT_CMDS+="chmod u+s ${NVGPUCSCMD}\n\n"
 	fi
 fi
