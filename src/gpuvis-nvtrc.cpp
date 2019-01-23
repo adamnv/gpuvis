@@ -1,6 +1,6 @@
 /*
  * Copyright 2018 Valve Software
- * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2018-2019, NVIDIA CORPORATION.  All rights reserved.
  *
  * All Rights Reserved.
  *
@@ -53,12 +53,6 @@
 
 #include "nv/NvTraceFormat.h"
 
-int64_t rdtsc_to_us(int64_t rdtsc)
-{
-    // checkme: might not be right, is rdtsc accuracy defined?
-    return int64_t(rdtsc);
-}
-
 void adapt_trace_info(trace_info_t &trace_info_dest, NvTraceFormat::FileData &fileData_src, const char *filename)
 {
     int64_t min_filedata_cpu_rdtsc = INT64_MAX;
@@ -74,10 +68,10 @@ void adapt_trace_info(trace_info_t &trace_info_dest, NvTraceFormat::FileData &fi
         min_filedata_cpu_rdtsc = std::min(min_filedata_cpu_rdtsc, fileData_src.deviceDescs[i].cpuTimestampStart);
     }
 
-    trace_info_dest.timestamp_in_us = true;
+    trace_info_dest.timestamp_in_us = false; // nvtrc timestamps are x64 RDTSC
     trace_info_dest.cpus = 0;
     trace_info_dest.file = filename;
-    trace_info_dest.min_file_ts = rdtsc_to_us(min_filedata_cpu_rdtsc); // perhaps just don't bother, check where this is used
+    trace_info_dest.min_file_ts = (min_filedata_cpu_rdtsc); // perhaps just don't bother, check where this is used
 }
 
 void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::FileData &fileData_src, StrPool &strpool)
@@ -92,7 +86,7 @@ void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::Fi
             adapted.pid = record.processId;
             adapted.id = INVALID_ID;
             adapted.cpu = 0;
-            adapted.ts = rdtsc_to_us(record.timestamp);
+            adapted.ts = record.timestamp;
 
             adapted.flags = TRACE_FLAG_AUTOGEN_COLOR; // maybe TRACE_FLAG_SCHED_SWITCH, swqueue, hwqueue...
             adapted.seqno = 0; //?
@@ -102,6 +96,7 @@ void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::Fi
 
             adapted.color = 0; // == default
 
+            //adapted.duration = 10000000000;//INT64_MAX; // == 'not set'
             adapted.duration = INT64_MAX; // == 'not set'
 
             adapted.comm = strpool.getstr("(event_comm)"); // command name
