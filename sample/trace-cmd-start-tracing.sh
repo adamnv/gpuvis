@@ -1,5 +1,8 @@
 #!/bin/bash
 
+pkexec `pwd`/nvgpucs -d -v -m setup
+pkexec `pwd`/nvgpucs -d -v -m start
+
 TRACECMD=$(which trace-cmd)
 
 if [ -z "${TRACECMD}" ]; then

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+./nvgpucs -d -v -m capture
+
 TRACE_ENABLED=0
 
 if [ -r /sys/kernel/tracing/tracing_on ]; then

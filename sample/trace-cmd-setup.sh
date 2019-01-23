@@ -83,6 +83,10 @@ else
     ROOT_CMDS+="chmod 0222 \"${TRACEFS}/trace_marker\"\n"
 fi
 
+# ADAM HACK - make this conditional or make it not necessary
+ROOT_CMDS+="# ADAM HACK - Set trace clock source to x64-tsc\n"
+ROOT_CMDS+="echo x86-tsc >/sys/kernel/tracing/trace_clock\n"
+
 if [ -z "${ROOT_CMDS}" ]; then
     :
 else
