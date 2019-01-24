@@ -74,18 +74,34 @@ void adapt_trace_info(trace_info_t &trace_info_dest, NvTraceFormat::FileData &fi
     trace_info_dest.min_file_ts = (min_filedata_cpu_rdtsc); // perhaps just don't bother, check where this is used
 }
 
+
 void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::FileData &fileData_src, StrPool &strpool)
 {
+    auto to_hex = [](uint64_t val)
+    {
+        std::stringstream ss;
+        ss << "0x" << std::hex << val;
+        return ss.str();
+    };
+
     for ( int i=0; i<fileData_src.deviceDescs.size(); ++i)
     {
         for ( NvTraceFormat::RecordGpuCtxSw &record : fileData_src.perDeviceData[i] )
         {
-            const std::string namehack[] = {"Invalid", "ContextSwitchedIn", "ContextSwitchedOut"};
+            const std::string namehack[] = {"Invalid", "GPU Context Switched In", "GPU Context Switched Out"};
             trace_event_t adapted;
+
+            // for now just drop any event that's not a GpuContextSwitch (i.e. unknown)
+            if (record.category != NvTraceFormat::Category16::GpuContextSwitch)
+                continue;
+
+            // drop invalid context switch types
+            if (record.type == NvTraceFormat::TypeGpuCtxSw16::Invalid)
+                continue;
 
             adapted.pid = record.processId;
             adapted.id = INVALID_ID;
-            adapted.cpu = 0;
+            adapted.cpu = 0; // perhaps gpuvis should support -1 here
             adapted.ts = record.timestamp;
 
             adapted.flags = TRACE_FLAG_AUTOGEN_COLOR; // maybe TRACE_FLAG_SCHED_SWITCH, swqueue, hwqueue...
@@ -99,10 +115,15 @@ void adapt_events(EventCallback &cb, trace_info_t &trace_info, NvTraceFormat::Fi
             //adapted.duration = 10000000000;//INT64_MAX; // == 'not set'
             adapted.duration = INT64_MAX; // == 'not set'
 
-            adapted.comm = strpool.getstr("(event_comm)"); // command name
+            adapted.comm = strpool.getstr((std::string("GPU Context #") + std::to_string(i) + " " + fileData_src.deviceDescs[i].name).c_str()); // command name
             adapted.system = strpool.getstr("nvcontext"); // event system
-            adapted.name = strpool.getstr(std::string("(event_name:" + namehack[int(record.type)] + ")").c_str()); // event name
-            adapted.user_comm = strpool.getstr("(event_usercomm)");
+            adapted.name = strpool.getstr(namehack[int(record.type)].c_str()); // event name
+            adapted.user_comm = adapted.comm;//(user_comm == comm) means ignore user_comm
+
+            adapted.numfields = 1;
+            adapted.fields = new event_field_t[ adapted.numfields ];
+            adapted.fields[0].key = strpool.getstr("ContextHandle");
+            adapted.fields[0].value = strpool.getstr(to_hex(record.contextHandle).c_str());
 
             cb(adapted);
         }
