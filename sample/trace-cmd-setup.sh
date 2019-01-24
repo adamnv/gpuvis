@@ -86,7 +86,7 @@ else
 		ROOT_CMDS+="chown root ${NVGPUCSCMD}\n\n"
 	
 		ROOT_CMDS+="# Add setuid bit to nvgpucs binary\n"
-		ROOT_CMDS+="chmod 454 ${NVGPUCSCMD}\n\n"
+		ROOT_CMDS+="chmod 454 ${NVGPUCSCMD}\n"
 		ROOT_CMDS+="chmod u+s ${NVGPUCSCMD}\n\n"
 	fi
 fi
