@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Valve Software
+ * Copyright 2019 Valve Software
  *
  * All Rights Reserved.
  *
@@ -118,15 +118,8 @@ public:
     TipWindows() {}
     ~TipWindows() {}
 
-    void update( bool mouse_captured );
+    void update();
     void set_tooltip( const char *name, bool *visible, const char *str );
-
-    bool imgui_draw_closebutton( const ImVec2 &center, float radius );
-
-public:
-    ImVec2 m_mousepos;
-    bool m_mouse_captured = false;
-    std::vector< rect_t > m_windows;
 };
 
 float imgui_scale( float val );
@@ -298,6 +291,8 @@ public:
     const std::string mstr( const std::string &str_in, ImU32 color );
     const std::string bright_str( const std::string &str_in )
         {  return m_buf[ TClr_Bright ] + str_in + m_buf[ TClr_Def ]; }
+    const std::string brightcomp_str( const std::string &str_in )
+        {  return m_buf[ TClr_BrightComp ] + str_in + m_buf[ TClr_Def ]; }
 
     void update_colors();
 
@@ -429,9 +424,10 @@ enum action_t
     action_graph_zoom_mouse,
     action_graph_hide_row,
 
+    action_graph_show_hovered_pid,
+    action_graph_show_hovered_tgid,
+
     action_cpugraph_hide_systemevents,
-    action_cpugraph_show_hovered_pid,
-    action_cpugraph_show_hovered_tgid,
 
     action_graph_set_markerA,
     action_graph_set_markerB,

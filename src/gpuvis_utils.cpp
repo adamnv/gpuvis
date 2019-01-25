@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Valve Software
+ * Copyright 2019 Valve Software
  *
  * All Rights Reserved.
  *
@@ -821,84 +821,15 @@ void imgui_set_custom_style( float alpha )
     }
 }
 
-void TipWindows::update( bool mouse_captured )
-{
-    // Update mouse position
-    m_mousepos = ImGui::GetMousePos();
-    m_mouse_captured = mouse_captured;
-
-    m_windows.clear();
-}
-
-bool TipWindows::imgui_draw_closebutton( const ImVec2 &center, float radius )
-{
-    ImVec2 diff = m_mousepos - center;
-    bool hovered = !m_mouse_captured &&
-            ( diff.x * diff.x + diff.y * diff.y ) <= ( radius * radius );
-    ImGuiCol idx = hovered ? ImGuiCol_CloseButtonHovered : ImGuiCol_CloseButton;
-    ImDrawList *DrawList = ImGui::GetWindowDrawList();
-
-    DrawList->AddCircleFilled( center, radius, ImGui::GetColorU32( idx ), 12);
-
-    if ( hovered )
-    {
-        ImU32 color = ImGui::GetColorU32( ImGuiCol_Text );
-        const ImVec2 center2 = center - ImVec2( 0.5f, 0.5f );
-        const float cross_extent = ( radius * 0.7071f ) - 1.0f;
-        ImVec2 a0 = center2 + ImVec2(  cross_extent,  cross_extent );
-        ImVec2 b0 = center2 + ImVec2( -cross_extent, -cross_extent );
-        ImVec2 a1 = center2 + ImVec2(  cross_extent, -cross_extent );
-        ImVec2 b1 = center2 + ImVec2( -cross_extent,  cross_extent );
-
-        DrawList->AddLine( a0, b0, color );
-        DrawList->AddLine( a1, b1, color );
-    }
-
-    return hovered;
-}
-
 void TipWindows::set_tooltip( const char *name, bool *visible, const char *str )
 {
     if ( !*visible || !str || !str[ 0 ] )
         return;
 
-    const ImGuiWindowFlags flags =
-            ImGuiWindowFlags_Tooltip |
-            ImGuiWindowFlags_ChildWindow |
-            ImGuiWindowFlags_NoTitleBar |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_NoSavedSettings |
-            ImGuiWindowFlags_AlwaysAutoResize;
+    std::string name_str = s_textclrs().bright_str( name );
 
-    ImGui::SetNextWindowPos( m_mousepos, ImGuiCond_FirstUseEver );
-    ImGui::Begin( name, NULL, flags );
-
-    // Get screen position before drawing title bar
-    ImVec2 screenpos = ImGui::GetCursorScreenPos();
-
-    // Draw title bar
-    imgui_text_bg( ImGui::GetStyleColorVec4( ImGuiCol_Header ), "%s%s%s",
-                   s_textclrs().str( TClr_Bright ), name, s_textclrs().str( TClr_Def ) );
-
-    // Calculate close button location and radius
-    float radius = ImGui::GetTextLineHeight() * 0.5f;
-    ImVec2 center = { screenpos.x + ImGui::GetWindowContentRegionWidth() - radius,
-                      screenpos.y + radius };
-
-    // Draw close button to right of title bar
-    bool hovered = imgui_draw_closebutton( center, radius );
-
-    // If close button was hovered and clicked, hide this window
-    if ( hovered && ImGui::IsMouseClicked( 0 ) )
-        *visible = false;
-
+    ImGui::Begin( name_str.c_str(), visible, ImGuiWindowFlags_AlwaysAutoResize );
     ImGui::Text( "%s", str );
-
-    rect_t rc = { ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
-                  ImGui::GetWindowSize().x, ImGui::GetWindowSize().y };
-    m_windows.push_back( { rc } );
-
     ImGui::End();
 }
 
@@ -1507,9 +1438,10 @@ void Actions::init()
 
     m_actionmap.push_back( { action_toggle_show_eventlist, KMOD_NONE, SDLK_F11, "Toggle showing event list" } );
 
+    m_actionmap.push_back( { action_graph_show_hovered_pid, KMOD_CTRL | KMOD_SHIFT, SDLK_s, "Toggle showing only first hovered pid events" } );
+    m_actionmap.push_back( { action_graph_show_hovered_tgid, KMOD_CTRL | KMOD_SHIFT, SDLK_t, "Toggle showing only first hovered tgid events" } );
+
     m_actionmap.push_back( { action_cpugraph_hide_systemevents, KMOD_CTRL | KMOD_SHIFT, SDLK_h, "CPU Graph: Toggle hiding sched_switch 'system' events" } );
-    m_actionmap.push_back( { action_cpugraph_show_hovered_pid, KMOD_CTRL | KMOD_SHIFT, SDLK_s, "CPU Graph: Toggle showing only hovered pid events" } );
-    m_actionmap.push_back( { action_cpugraph_show_hovered_tgid, KMOD_CTRL | KMOD_SHIFT, SDLK_t, "CPU Graph: Toggle showing only hovered tgid events" } );
 
     m_actionmap.push_back( { action_graph_zoom_row, KMOD_CTRL | KMOD_SHIFT, SDLK_z, "Graph: Toggle hovered row timeline fullscreen" } );
     m_actionmap.push_back( { action_graph_zoom_mouse, KMOD_NONE, SDLK_z, "Graph: Toggle hovered location zoom to 3ms / restore pre-zoom" } );

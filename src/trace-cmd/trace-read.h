@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Valve Software
+ * Copyright 2019 Valve Software
  *
  * All Rights Reserved.
  *
@@ -132,6 +132,10 @@ struct trace_info_t
     // ts where we trimmed from
     bool trim_trace = false;
     int64_t trimmed_ts = 0;
+
+    // Manual load trimming
+    uint64_t m_tracestart = 0;
+    uint64_t m_tracelen = 0;
 
     // Map tgid to vector of child pids and color
     util_umap< int, tgid_info_t > tgid_pids;

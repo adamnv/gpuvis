@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Valve Software
+ * Copyright 2019 Valve Software
  *
  * All Rights Reserved.
  *
@@ -115,10 +115,12 @@ public:
 
     bool add_location( const trace_event_t &event );
     std::vector< uint32_t > *get_locations( const trace_event_t &event );
-    std::vector< uint32_t > *get_locations( const char *ringstr, uint32_t seqno, const char *ctxstr );
+    std::vector< uint32_t > *get_locations( uint32_t ringno, uint32_t seqno, const char *ctxstr );
 
-    uint64_t db_key( const trace_event_t &event );
-    uint64_t db_key( const char *ringstr, uint32_t seqno, const char *ctxstr );
+    static uint64_t db_key( const trace_event_t &event );
+    static uint64_t db_key( uint32_t ringno, uint32_t seqno, const char *ctxstr );
+
+    static uint32_t get_i915_ringno( const trace_event_t &event, bool *is_class_instance = nullptr );
 
     void clear();
 
@@ -525,10 +527,13 @@ public:
         // Intel request_wait_end events key'd on: "i915_reqwait ring%u",ring
         TraceLocations reqwait_end_locs;
 
-        // i915_gem_request_[add|submit|in|out], intel_engine_notify events
+        // i915_request_[add|submit|in|out], intel_engine_notify events
         TraceLocationsRingCtxSeq gem_req_locs;
         // Intel request events key'd on: "i915_req ring%u",ring
         TraceLocations req_locs;
+
+        // i915_request_queue events key'd on ring/ctx/seqno
+        TraceLocationsRingCtxSeq req_queue_locs;
     } m_i915;
 
     struct ftrace_pair_t
@@ -910,7 +915,10 @@ public:
         ImVec2 mouse_capture_last;
         mouse_captured_t mouse_captured = MOUSE_NOT_CAPTURED;
 
+        int cpu_filter_pid = 0;
+        int cpu_filter_tgid = 0;
         std::unordered_set< int > cpu_timeline_pids;
+
         bool cpu_hide_system_events = false;
 
         const int64_t s_min_length = 100;
@@ -1106,6 +1114,9 @@ public:
     {
         // State_Idle, Loading, Loaded, CancelLoading
         SDL_atomic_t state = { 0 };
+
+        uint64_t tracestart = 0;
+        uint64_t tracelen = 0;
 
         std::string filename_in_progress;
         tracefile_type_t UNUSED_file_format = TRACEFILE_Unspec;

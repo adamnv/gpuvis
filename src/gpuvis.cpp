@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Valve Software
+ * Copyright 2019 Valve Software
  *
  * All Rights Reserved.
  *
@@ -115,29 +115,96 @@ Actions &s_actions()
 /*
  * TraceLocationsRingCtxSeq
  */
-uint64_t TraceLocationsRingCtxSeq::db_key( const char *ringstr, uint32_t seqno, const char *ctxstr )
-{
-    uint32_t ctx = strtoul( ctxstr, NULL, 10 );
-    uint32_t ring = strtoul( ringstr, NULL, 10 );
 
-    // ring | ctx      | seqno
-    //  0xe | 1fffffff | ffffffff
-    return ( ( uint64_t )ring << 61 ) | ( ( uint64_t )ctx << 32 ) | seqno;
+static const char *get_i915_engine_str( char ( &buf )[ 64 ], uint32_t classno )
+{
+    switch( classno & 0xf )
+    {
+    case 0: return "render"; //   I915_ENGINE_CLASS_RENDER        = 0,
+    case 1: return "copy";   //   I915_ENGINE_CLASS_COPY          = 1,
+    case 2: return "vid";    //   I915_ENGINE_CLASS_VIDEO         = 2,
+    case 3: return "videnh"; //   I915_ENGINE_CLASS_VIDEO_ENHANCE = 3,
+    }
+
+    snprintf_safe( buf, "engine%u:", classno & 0xf );
+    return buf;
+}
+
+uint32_t TraceLocationsRingCtxSeq::get_i915_ringno( const trace_event_t &event, bool *is_class_instance )
+{
+    if ( is_class_instance )
+        *is_class_instance = false;
+
+    if ( event.seqno )
+    {
+        const char *ringstr = get_event_field_val( event, "ring", NULL );
+
+        if ( ringstr )
+        {
+            // Return old i915_gem_ event: ring=%u
+            return strtoul( ringstr, NULL, 10 );
+        }
+        else
+        {
+            // Check new i915 event: engine=%u16:%u16 (class:instance)
+            const char *classstr = get_event_field_val( event, "class", NULL );
+            const char *instancestr = get_event_field_val( event, "instance", NULL );
+
+            if ( classstr && instancestr )
+            {
+                uint32_t classno = strtoul( classstr, NULL, 10 );
+                uint32_t instanceno = strtoul( instancestr, NULL, 10 );
+
+                if ( is_class_instance )
+                    *is_class_instance = true;
+
+                // engine_class from Mesa:
+                //   I915_ENGINE_CLASS_RENDER        = 0,
+                //   I915_ENGINE_CLASS_COPY          = 1,
+                //   I915_ENGINE_CLASS_VIDEO         = 2,
+                //   I915_ENGINE_CLASS_VIDEO_ENHANCE = 3,
+                assert( classno <= 0xf );
+                return ( instanceno << 4 ) | classno;
+            }
+        }
+    }
+
+    return ( uint32_t )-1;
+}
+
+uint64_t TraceLocationsRingCtxSeq::db_key( uint32_t ringno, uint32_t seqno, const char *ctxstr )
+{
+    if ( ringno != ( uint32_t )-1 )
+    {
+        uint64_t ctx = strtoul( ctxstr, NULL, 10 );
+
+        // Try to create unique 64-bit key from ring/seq/ctx.
+        assert( ctx <= 0xffff );
+        assert( ringno <= 0xffff );
+        assert( seqno <= 0xffffffff );
+
+        //    ring | ctx  |    seqno
+        //  0xffff | ffff | ffffffff
+        return ( ( uint64_t )ringno << 48 ) | ( ( uint64_t )ctx << 32 ) | seqno;
+    }
+
+    return 0;
 }
 
 uint64_t TraceLocationsRingCtxSeq::db_key( const trace_event_t &event )
 {
     if ( event.seqno )
     {
-        const char *ringstr = get_event_field_val( event, "ring", NULL );
         const char *ctxstr = get_event_field_val( event, "ctx", NULL );
 
         // i915:intel_engine_notify has only ring & seqno, so default ctx to "0"
         if ( !ctxstr && !strcmp( event.name, "intel_engine_notify" ) )
             ctxstr = "0";
 
-        if ( ringstr && ctxstr )
-            return db_key( ringstr, event.seqno, ctxstr );
+        if ( ctxstr )
+        {
+            return db_key( get_i915_ringno( event ), event.seqno, ctxstr );
+        }
     }
 
     return 0;
@@ -170,9 +237,9 @@ std::vector< uint32_t > *TraceLocationsRingCtxSeq::get_locations( const trace_ev
     return m_locs.get_val( key );
 }
 
-std::vector< uint32_t > *TraceLocationsRingCtxSeq::get_locations( const char *ringstr, uint32_t seqno, const char *ctxstr )
+std::vector< uint32_t > *TraceLocationsRingCtxSeq::get_locations( uint32_t ringno, uint32_t seqno, const char *ctxstr )
 {
-    uint64_t key = db_key( ringstr, seqno, ctxstr );
+    uint64_t key = db_key( ringno, seqno, ctxstr );
 
     return m_locs.get_val( key );
 }
@@ -250,9 +317,7 @@ void Opts::init()
     add_opt_graph_rowsize( "gfx", 8 );
 
     // Default sizes for these rows are in get_comm_option_id() in gpuvis_graph.cpp...
-    //   add_opt_graph_rowsize( "print", 10 );
-    //   add_opt_graph_rowsize( "i915_req ring0", 8 );
-    //   add_opt_graph_rowsize( "i915_reqwait ring0", 2, 2 );
+    //   "print", "i915_req", "i915_reqwait", ...
 
     // Create all the entries for the compute shader rows
     // for ( uint32_t val = 0; ; val++ )
@@ -701,7 +766,11 @@ int SDLCALL MainApp::thread_func( void *data )
 
     trace_info_t &trace_info_output = trace_events.m_trace_info;
     trace_info_output.trim_trace = s_opts().getb( OPT_TrimTrace );
-
+    trace_events.m_trace_info.m_tracestart = loading_info->tracestart;
+    trace_events.m_trace_info.m_tracelen = loading_info->tracelen;
+    loading_info->tracestart = 0;
+    loading_info->tracelen = 0;
+    
     std::vector<trace_info_t> inputfiles_traceinfos;
 
     EventCallback trace_cb = std::bind( &TraceEvents::event_add_cb, &trace_events, _1 );
@@ -1963,28 +2032,41 @@ void TraceEvents::init_i915_event( trace_event_t &event )
 
         if ( plocs )
         {
+            bool ringno_is_class_instance;
+            uint32_t ringno = TraceLocationsRingCtxSeq::get_i915_ringno( event, &ringno_is_class_instance );
             trace_event_t &event_begin = m_events[ plocs->back() ];
-            const char *ring = get_event_field_val( event, "ring", NULL );
 
             event_begin.duration = event.ts - event_begin.ts;
             event.duration = event_begin.duration;
 
-            if ( ring )
+            if ( ringno != ( uint32_t )-1 )
             {
-                char buf[ 128 ];
-                uint32_t ringno = strtoul( ring, NULL, 10 );
+                char buf[ 64 ];
+                uint32_t hashval;
 
                 event.graph_row_id = ( uint32_t )-1;
-                event.id_start = event_begin.id;
 
-                snprintf_safe( buf, "i915_reqwait ring%u", ringno );
-                m_i915.reqwait_end_locs.add_location_str( buf, event.id );
+                // Point i915_request_wait_end to i915_request_wait_begin
+                event.id_start = event_begin.id;
+                // Point i915_request_wait_begin to i915_request_wait_end
+                event_begin.id_start = event.id;
+
+                if ( ringno_is_class_instance )
+                    hashval = m_strpool.getu32f( "i915_reqwait %s%u", get_i915_engine_str( buf, ringno ), ringno >> 4 );
+                else
+                    hashval = m_strpool.getu32f( "i915_reqwait ring%u", ringno );
+
+                m_i915.reqwait_end_locs.add_location_u32( hashval, event.id );
             }
         }
     }
-    else if ( event_type <= i915_req_Notify )
+    else if ( event_type < i915_req_Max )
     {
+        // Queue, Add, Submit, In, Notify, Out
         m_i915.gem_req_locs.add_location( event );
+
+        if ( event_type == i915_req_Queue )
+            m_i915.req_queue_locs.add_location( event );
     }
 }
 
@@ -2463,24 +2545,67 @@ void TraceEvents::calculate_amd_event_durations()
     }
 }
 
+// Old:
+//  i915_gem_request_add        dev=%u, ring=%u, ctx=%u, seqno=%u, global=%u
+//  i915_gem_request_submit     dev=%u, ring=%u, ctx=%u, seqno=%u, global=%u
+//  i915_gem_request_in         dev=%u, ring=%u, ctx=%u, seqno=%u, global=%u, port=%u
+//  i915_gem_request_out        dev=%u, ring=%u, ctx=%u, seqno=%u, global=%u, port=%u
+//  i915_gem_request_wait_begin dev=%u, ring=%u, ctx=%u, seqno=%u, global=%u, blocking=%u, flags=0x%x
+//  i915_gem_request_wait_end   ring=%u, ctx=%u, seqno=%u, global=%u
+//  i915_gem_request_queue      dev=%u, ring=%u, ctx=%u, seqno=%u, flags=0x%x
+//  intel_engine_notify         dev=%u, ring=%u, seqno=$u, waiters=%u
+
+// New (in v4.17):
+//  engine is "uabi_class:instance" u16 pairs stored as 'class':'instance' in ftrace file.
+//    class: I915_ENGINE_CLASS_RENDER, _COPY, _VIDEO, _VIDEO_ENHANCE
+//  i915_request_add            dev=0, engine=0:0, hw_id=9, ctx=30, seqno=2032, global=0
+//  i915_request_submit**       dev=0, engine=0:0, hw_id=9, ctx=30, seqno=6, global=0
+//  i915_request_in**           dev=0, engine=0:0, hw_id=9, ctx=30, seqno=3, prio=0, global=708, port=0
+//  i915_request_out**          dev=0, engine=0:0, hw_id=9, ctx=30, seqno=10552, global=12182, completed?=1
+//  i915_request_wait_begin     dev=0, engine=0:0, hw_id=9, ctx=30, seqno=120, global=894, blocking=0, flags=0x1
+//  i915_request_wait_end       dev=0, engine=0:0, hw_id=9, ctx=30, seqno=105, global=875
+//  i915_request_queue          dev=0, engine=0:0, hw_id=9, ctx=30, seqno=26, flags=0x0
+//  intel_engine_notify         dev=0, engine=0:0, seqno=11923, waiters=1
+
+// [**] Tracepoints only available w/ CONFIG_DRM_I915_LOW_LEVEL_TRACEPOINTS Kconfig enabled.
+
+// Svetlana:
+//  i915_request_queue: interrupt handler (should have tid of user space thread)
+
+// Notes from tursulin_ on #intel-gfx (Thanks Tvrtko!):
+//   'completed' you can detect preemption with
+//     if not 'completed' you know the same requests will be re-appearing at some later stage to run some more
+//   'waiters' means if anyone is actually listening for this event
+//   'blocking' you probably don't care about
+//   'priority' is obviously context priority which scheduler uses to determine who runs first
+//     for instance page flips get elevated priority so any request which contains data dependencies associated with that page flip will get priority bumped
+//     (and so can trigger preemption on other stuff)
+//   oh and btw, if you start "parsing" preemption, once you have a completed=0 notification the global seqno next time might be different
+//   so you use ctx and seqno fields to track request lifetime and global seqno for execution timeline
+//   ctx+seqno+engine for uniqueness
+
 i915_type_t get_i915_reqtype( const trace_event_t &event )
 {
-    if ( !strcmp( event.name, "i915_gem_request_queue" ) )
-        return i915_req_Queue;
-    else if ( !strcmp( event.name, "i915_gem_request_add" ) )
-        return i915_req_Add;
-    else if ( !strcmp( event.name, "i915_gem_request_submit" ) )
-        return i915_req_Submit;
-    else if ( !strcmp( event.name, "i915_gem_request_in" ) )
-        return i915_req_In;
-    else if ( !strcmp( event.name, "i915_gem_request_out" ) )
-        return i915_req_Out;
-    else if ( !strcmp( event.name, "intel_engine_notify" ) )
+    if ( !strcmp( event.name, "intel_engine_notify" ) )
         return i915_req_Notify;
-    else if ( !strcmp( event.name, "i915_gem_request_wait_begin" ) )
-        return i915_reqwait_begin;
-    else if ( !strcmp( event.name, "i915_gem_request_wait_end" ) )
-        return i915_reqwait_end;
+
+    if ( !strncmp( event.name, "i915_", 5 ) )
+    {
+        if ( strstr( event.name, "_request_queue" ) )
+            return i915_req_Queue;
+        else if ( strstr( event.name, "_request_add" ) )
+            return i915_req_Add;
+        else if ( strstr( event.name, "_request_submit" ) )
+            return i915_req_Submit;
+        else if ( strstr( event.name, "_request_in" ) )
+            return i915_req_In;
+        else if ( strstr( event.name, "_request_out" ) )
+            return i915_req_Out;
+        else if ( strstr( event.name, "_request_wait_begin" ) )
+            return i915_reqwait_begin;
+        else if ( strstr( event.name, "_request_wait_end" ) )
+            return i915_reqwait_end;
+    }
 
     return i915_req_Max;
 }
@@ -2525,7 +2650,8 @@ void TraceEvents::calculate_i915_req_event_durations()
     // Our map should have events with the same ring/ctx/seqno
     for ( auto &req_locs : m_i915.gem_req_locs.m_locs.m_map )
     {
-        const char *ring = "";
+        uint32_t ringno = ( uint32_t )-1;
+        bool ringno_is_class_instance = false;
         trace_event_t *events[ i915_req_Max ] = { NULL };
         std::vector< uint32_t > &locs = req_locs.second;
 
@@ -2534,16 +2660,18 @@ void TraceEvents::calculate_i915_req_event_durations()
             trace_event_t &event = m_events[ index ];
             i915_type_t event_type = get_i915_reqtype( event );
 
-            if ( event_type <= i915_req_Out )
-            {
-                events[ event_type ] = &event;
+            // i915_reqwait_begin/end handled elsewhere...
+            assert( event_type <= i915_req_Out );
 
-                if ( !ring[ 0 ] )
-                    ring = get_event_field_val( event, "ring" );
+            events[ event_type ] = &event;
+
+            if ( ringno == ( uint32_t )-1 )
+            {
+                ringno = TraceLocationsRingCtxSeq::get_i915_ringno( event, &ringno_is_class_instance );
             }
         }
 
-        // Notify shouldn't be set yet. It only has a ring and global seqno.
+        // Notify shouldn't be set yet. It only has a ring and global seqno, no ctx.
         // If we have request_in, search for the corresponding notify.
         if ( !events[ i915_req_Notify ] && events[ i915_req_In ] )
         {
@@ -2556,7 +2684,7 @@ void TraceEvents::calculate_i915_req_event_durations()
             {
                 uint32_t global_seqno = strtoul( globalstr, NULL, 10 );
                 const std::vector< uint32_t > *plocs =
-                        m_i915.gem_req_locs.get_locations( ring, global_seqno, "0" );
+                        m_i915.gem_req_locs.get_locations( ringno, global_seqno, "0" );
 
                 // We found event(s) that match our ring and global seqno.
                 if ( plocs )
@@ -2584,6 +2712,7 @@ void TraceEvents::calculate_i915_req_event_durations()
             }
         }
 
+        // queue: req_queue -> req_add
         bool set_duration = intel_set_duration( events[ i915_req_Queue ], events[ i915_req_Add ], col_Graph_Bari915Queue );
 
         // submit-delay: req_add -> req_submit
@@ -2603,13 +2732,23 @@ void TraceEvents::calculate_i915_req_event_durations()
 
         if ( set_duration )
         {
-            uint32_t ringno = strtoul( ring, NULL, 10 );
-            uint32_t hashval = m_strpool.getu32f( "i915_req ring%u", ringno );
+            char buf[ 64 ];
+            uint32_t hashval;
+            int pid = events[ i915_req_Queue ] ? events[ i915_req_Queue ]->pid : 0;
+
+            if ( ringno_is_class_instance )
+                hashval = m_strpool.getu32f( "i915_req %s%u", get_i915_engine_str( buf, ringno ), ringno >> 4 );
+            else
+                hashval = m_strpool.getu32f( "i915_req ring%u", ringno );
 
             for ( uint32_t i = 0; i < i915_req_Max; i++ )
             {
                 if ( events[ i ] )
                 {
+                    // Switch the kernel pids in this group to match the i915_request_queue event (ioctl from user space).
+                    if ( pid && !events[ i ]->pid )
+                        events[ i ]->pid = pid;
+
                     events[ i ]->graph_row_id = ( uint32_t )-1;
                     m_i915.req_locs.add_location_u32( hashval, events[ i ]->id );
                 }
@@ -2678,12 +2817,12 @@ const std::vector< uint32_t > *TraceEvents::get_locs( const char *name,
         type = LOC_TYPE_Print;
         plocs = &m_ftrace.print_locs;
     }
-    else if ( !strncmp( name, "i915_reqwait ring", 17 ) )
+    else if ( !strncmp( name, "i915_reqwait ", 13 ) )
     {
         type = LOC_TYPE_i915RequestWait;
         plocs = m_i915.reqwait_end_locs.get_locations_str( name );
     }
-    else if ( !strncmp( name, "i915_req ring", 13 ) )
+    else if ( !strncmp( name, "i915_req ", 9 ) )
     {
         type = LOC_TYPE_i915Request;
         plocs = m_i915.req_locs.get_locations_str( name );
@@ -2906,9 +3045,6 @@ void TraceWin::render()
                 m_eventlist.goto_eventid = ts_to_eventid( m_graph.start_ts + m_graph.length_ts / 2 );
             }
 
-            // Update pinned tooltips
-            m_ttip.tipwins.update( m_graph.mouse_captured != MOUSE_NOT_CAPTURED );
-
             if ( !s_opts().getb( OPT_ShowEventList ) ||
                  imgui_collapsingheader( "Event Graph", &m_graph.has_focus, ImGuiTreeNodeFlags_DefaultOpen ) )
             {
@@ -2924,7 +3060,7 @@ void TraceWin::render()
                 eventlist_handle_hotkeys();
             }
 
-            // Render any pinned tooltips
+            // Render pinned tooltips
             m_ttip.tipwins.set_tooltip( "Pinned Tooltip", &m_ttip.visible, m_ttip.str.c_str() );
 
             // graph/eventlist didn't handle this action, so just toggle ttip visibility.
@@ -4425,7 +4561,7 @@ void MainApp::render_color_picker()
     {
         changed |= render_color_picker_colors( m_colorpicker, m_colorpicker_color );
     }
-    else if ( !m_colorpicker_event.empty() )
+    else if ( !m_colorpicker_event.empty() && win )
     {
         changed |= render_color_picker_event_colors( m_colorpicker,
                 win, m_colorpicker_event );
@@ -4447,7 +4583,7 @@ void MainApp::render_color_picker()
 
             s_textclrs().update_colors();
         }
-        else if ( !m_colorpicker_event.empty() )
+        else if ( !m_colorpicker_event.empty() && win )
         {
             win->m_trace_events.set_event_color( m_colorpicker_event, m_colorpicker.m_color );
         }
@@ -4735,6 +4871,8 @@ void MainApp::parse_cmdline( int argc, char **argv )
     static struct option long_opts[] =
     {
         { "scale", ya_required_argument, 0, 0 },
+        { "tracestart", ya_required_argument, 0, 0 },
+        { "tracelen", ya_required_argument, 0, 0 },
 #if !defined( GPUVIS_TRACE_UTILS_DISABLE )
         { "trace", ya_no_argument, 0, 0 },
 #endif
@@ -4751,6 +4889,10 @@ void MainApp::parse_cmdline( int argc, char **argv )
         case 0:
             if ( !strcasecmp( "scale", long_opts[ opt_ind ].name ) )
                 s_opts().setf( OPT_Scale, atof( ya_optarg ) );
+            else if ( !strcasecmp( "tracestart", long_opts[ opt_ind ].name ) )
+                m_loading_info.tracestart = timestr_to_ts( ya_optarg );
+            else if ( !strcasecmp( "tracelen", long_opts[ opt_ind ].name ) )
+                m_loading_info.tracelen = timestr_to_ts( ya_optarg );
             break;
         case 'i':
             m_loading_info.inputfiles.push_back( ya_optarg );

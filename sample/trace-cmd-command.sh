@@ -1,10 +1,19 @@
 #!/bin/bash
 
-`pwd`/nvgpucs -d -v -m setup
-`pwd`/nvgpucs -d -v -m start
+# Get path our script is running in
+SCRIPT=$(realpath -s $0)
+SCRIPTPATH=$(dirname $SCRIPT)
+
+# Dirs to search for gpuvis binary in
+GPUVISDIRS=(../_release ../_debug ../build)
+
+COMMAND="$@"
+if [ -z "${COMMAND}" ]; then
+    echo "USAGE: ./trace-cmd-trace-command.sh [command ...]"
+    exit 0
+fi
 
 TRACECMD=$(which trace-cmd)
-
 if [ -z "${TRACECMD}" ]; then
     echo "ERROR: Could not locate trace-cmd binary"
     exit -1
@@ -13,6 +22,17 @@ fi
 if [ ! -u "${TRACECMD}" ]; then
     echo "ERROR: ${TRACECMD} setuid bit not set. Run trace-cmd-setup.sh?"
     exit -1
+fi
+
+# Try to find a gpuvis binary
+GPUVISBIN=$(which gpuvis)
+if [ -z "${GPUVISBIN}" ]; then
+  for i in ${GPUVISDIRS[@]}; do
+    if [ -x "${SCRIPTPATH}/${i}/gpuvis" ]; then
+      GPUVISBIN="${SCRIPTPATH}/${i}/gpuvis"
+      break
+    fi
+  done
 fi
 
 EVENTS=
@@ -62,14 +82,21 @@ EVENTS+=" -e i915:i915_request_execute"
 
 EVENTS+=" -e i915:i915_pipe_update_vblank_evaded"
 
-CMD="trace-cmd reset"
+DATE=$(date +%m-%d-%Y_%H-%M-%S)
+TRACEFILE=trace_${DATE}.dat
+
+echo
+CMD="trace-cmd record -b 8000 -D -o ${TRACEFILE} -i ${EVENTS} ${COMMAND}"
 echo $CMD
 $CMD
 
-echo
-CMD="trace-cmd start -b 8000 -D -i ${EVENTS}"
-echo $CMD
-$CMD
+# Open trace in gpuvis if we found it, otherwise trace-cmd report
+if [ -x "${GPUVISBIN}" ]; then
+  CMD="${GPUVISBIN} ${TRACEFILE}"
+else
+  CMD="trace-cmd report -l ${TRACEFILE} | less"
+fi
 
 echo
-./trace-cmd-status.sh
+echo $CMD
+$CMD
